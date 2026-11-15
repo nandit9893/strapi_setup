@@ -1,0 +1,125 @@
+PROJECT CONTEXT (is file ko pehle padho)
+=========================================
+Ye file ek purani chat ka poora saar hai. User Hindi/Hinglish me baat karta hai,
+isliye reply Hinglish (Roman script) me do, jab tak user alag na bole.
+
+
+1. USER KI PROBLEM
+------------------
+- Strapi (v5 maana gaya, user ne abhi tak version confirm nahi kiya) me ek collection type
+  me ~500 entries hain.
+- Jab bhi naye variables/fields add hote hain, user purani entries delete karke seed script
+  chalata hai. Seed sirf ENGLISH me data banata hai (script data me sirf English file hai).
+- Seed ke baad har entry ko Spanish (ya koi aur locale) me admin UI se manually translate +
+  publish karna padta hai: ~30 sec per entry = ~2.5 ghante.
+- Goal: ek script jo seed ke baad chalane par 5 minute ke andar, collection types aur single
+  types dono ki saari entries ke saare text fields Spanish me translate karke publish kar de.
+
+2. USER KI REQUIREMENTS (final)
+-------------------------------
+- Field names script me hardcode nahi karne. Script khud saare text fields dhundhe.
+- Collection types AUR single types dono support hon.
+- Ye check nahi karna ki Spanish pehle se hai ya nahi. Seed ke baad jab bhi script chale,
+  hamesha sab translate + overwrite + publish ho.
+- Strapi ke server/code ka access nahi hai (Strapi Cloud jaisa setup maana). Isliye script
+  bahar se REST API ke through chalti hai, Strapi project ke andar nahi.
+- Strapi ka AI "Translate" button admin UI feature hai. Uska koi documented external API/script
+  nahi mila, isliye LLM API use ki.
+- User ne poocha tha: kaunsi translation API sasti aur badiya hai, aur kya Strapi translation
+  se sasti hai.
+
+3. ABHI TAK KE FAISLE
+---------------------
+- Translation API: Claude Haiku 5.5 (model ID: claude-haiku-5-5).
+  Pricing (Oct 2026 ke search results se): $0.10 per million input tokens,
+  $0.50 per million output tokens, jab tak prompt <= 100K tokens ho. 100K se upar rate 5x
+  ($0.50 / $2.50). Script har request ~6000 characters / 40 strings tak rakhti hai, to
+  limit cross nahi hoti.
+  500 entries ka andaza: kuch cents se ~1 dollar (estimate, verify nahi kiya).
+  Strapi AI translation ka price verify nahi ho paya (plan/credits pe depend).
+  DeepL/Google per-character charge karte hain (yaad se, verify nahi).
+- Script Node 18+ me chalti hai, koi npm install nahi (fetch built-in, .env loader khud ka).
+- Auth: Strapi API Token (Bearer) + Anthropic API key, .env file me.
+
+4. CHAT ME KYA HUA (history, short)
+-----------------------------------
+1) Pehle suggestion: seed ko upsert banao (delete-recreate se locale data chala jata hai) aur
+   ek in-Strapi script (strapi.documents Document Service) jo locale create + publish kare.
+2) User ne bataya ki seed sirf English hota hai, to batch translation script di (DeepL).
+   Isme galti thi: docs.localize ko Document Service method bataya gaya, jo galat tha.
+   Locale version banane ke liye documents().update({ documentId, locale, data }) use hota hai.
+3) User ne kaha field names nahi dene. In-Strapi script di jo schema (strapi.contentTypes)
+   se text fields, components, dynamic zones khud walk karti thi (Claude API se translate).
+4) User ne poocha server access na ho to? REST API wali remote script di (translate-remote.js).
+   Usme translateBatch khaali chhoda gaya tha; baad me user ko fill karne ko bola gaya.
+5) User ne bola Spanish check nahi karna aur single type bhi chahiye. Final project banaya:
+   ye folder (translate.js + config + README).
+
+   NOTE: purani in-Strapi script ab reference/ folder me hai (translate-all-inside-strapi.js).
+   Agar user ke paas kabhi server/code access ho, to wo approach zyada reliable hai kyunki
+   schema se pata chal jata hai kaun se fields localized hain aur kaunse enum/uid hain.
+   reference/seed-upsert-example.js: seed ko delete-recreate ke bajay upsert banane ka example.
+
+5. FILES IS FOLDER ME
+---------------------
+- translate.js            : main script (collection + single types)
+- translate.config.json   : strapiUrl, sourceLocale, targetLocales, collections, singles,
+                            skipKeys, model
+- .env.example            : STRAPI_TOKEN, ANTHROPIC_API_KEY (copy karke .env banao)
+- README.md               : setup + run steps
+- reference/              : purani (final nahi) scripts: in-Strapi version + seed upsert example
+- CONTEXT.txt             : ye file
+- CLAUDE.md               : Claude Code ke liye chhota pointer
+
+6. SCRIPT KAISE KAAM KARTI HAI
+------------------------------
+1. config me di gayi collections (plural API ID) aur singles (singular API ID) looptI hai.
+2. English entries GET /api/<name>?locale=en&status=draft se leti hai (100 per page).
+3. Populate automatically discover karti hai: pehle populate=*, phir response dekhkar
+   nested components aur dynamic zones (populate[x][on][comp][populate]...) jodti hai, jab tak
+   tree stable na ho (max 6 rounds).
+4. Data saaf karti hai (prep): id/documentId/createdAt/updatedAt/publishedAt/locale/
+   localizations hataati hai, media ko id se replace karti hai, relations drop karti hai.
+5. Saare string values collect karti hai (collect + isText). Skip: slug, uid, url, email,
+   type, format, mime, ext, hash, provider, __component, skipKeys, URLs, emails, dates,
+   numbers, lowercase identifiers (enum jaisi) aur UPPER_CASE constants.
+6. Duplicate strings dedupe karti hai, ~6000 char / 40 strings ke batch me Claude ko bhejti
+   hai (5 parallel). Retry + batch split fallback hai.
+7. Har entry ko PUT karti hai (10 parallel):
+     collection: PUT /api/<name>/<documentId>?locale=es&status=published
+     single    : PUT /api/<name>?locale=es&status=published
+8. End me published count verify karke print karti hai.
+
+Commands:
+  node translate.js --test 3     (pehle 3 entries pe test)
+  node translate.js              (sab)
+  node translate.js products     (ek content type)
+
+7. KHULE SAWAAL / RISKS (agla kaam yahin se)
+-------------------------------------------
+- SCRIPT KABHI CHALAI NAHI GAYI. Kisi real Strapi pe test nahi hui. Pehle --test 3 chalao.
+- PUBLISH BEHAVIOR UNVERIFIED: REST PUT me status=published se locale version publish hota
+  hai ya nahi, Strapi docs se confirm nahi hua. Agar end me "published count kam hai"
+  dikhe, to options: (a) Strapi docs se sahi tareeka dekho, (b) admin API
+  (/content-manager/.../actions/publish) with admin JWT, (c) in-Strapi script.
+- NON-LOCALIZED FIELDS: REST se pata nahi chalta kaun sa field localized hai. Non-localized
+  field me Spanish value bheji gayi to English wali overwrite ho sakti hai. Test ke baad
+  English entries zaroor check karo; bure fields skipKeys me daalo.
+- ENUM FIELDS: heuristic se skip hote hain, lekin "Primary" jaisi capitalized enum value
+  translate ho jayegi aur validation error aayegi -> skipKeys me daalo.
+- RELATIONS drop hoti hain. Agar relation localized hai to Spanish entry me khaali rahegi.
+- Strapi version (v4/v5) user ne confirm nahi kiya. Script v5 (documentId, status param) ke
+  liye hai. v4 me alag API (publicationState, numeric id, publishedAt) lagegi.
+- Slug/uid English wala hi jata hai. User ko alag Spanish slug chahiye to poochho.
+- Rich text (blocks type) ke text nodes translate hote hain; markdown richtext string ke
+  roop me poora translate hota hai.
+- Strapi Cloud rate limits: 429 aaye to retry hota hai; concurrency 10 se kam kar sakte ho.
+
+8. AGLE STEPS
+-------------
+1. User se Strapi version (v4/v5), 1-2 collection ke plural API IDs aur single types ke
+   naam confirm karo, config me bharo.
+2. node translate.js --test 3 chalwao aur output/errors dekho.
+3. Errors ke hisaab se fix karo (publish, skipKeys, populate, media/relations).
+4. Chaho to extra locales targetLocales me daalo.
+5. Optional: seed ke baad automatically chalane ke liye package.json script ya CI step.

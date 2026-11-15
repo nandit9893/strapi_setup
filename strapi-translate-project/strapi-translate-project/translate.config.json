@@ -1,0 +1,11 @@
+{
+  "strapiUrl": "http://localhost:1337",
+  "sourceLocale": "en",
+  "targetLocales": ["es"],
+  "collections": ["top-country-products"],
+  "singles": [],
+  "skipKeys": [],
+  "provider": "gemini",
+  "model": "gemini-flash-lite-latest",
+  "requestsPerMinute": 10
+}
